@@ -47,8 +47,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
 def _cmd_review(args: argparse.Namespace) -> int:
     """Show recent review stats."""
     log = get_log()
-    proj_cfg = load_project_config()
-    config_path = _find_config_path()
+    proj_cfg = load_project_config(args.path)
+    config_path = _find_config_path(args.path)
 
     print("harness-guard 状态")
     print("─" * 40)
@@ -83,10 +83,10 @@ def _cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
-def _find_config_path() -> str | None:
+def _find_config_path(project_dir: str | None = None) -> str | None:
     """Find the .hermes-guard.yaml path, or None."""
     from .project_config import _find_project_root
-    root = _find_project_root()
+    root = _find_project_root(project_dir)
     if root:
         return str(root / _CONFIG_FILENAME)
     return None
@@ -112,6 +112,11 @@ def _setup_parser(parser: argparse.ArgumentParser) -> None:
 
     # review
     p_review = sub.add_parser("review", help="显示审查统计和项目配置状态")
+    p_review.add_argument(
+        "--path", "-p",
+        default=None,
+        help="项目路径 (默认: 当前目录)",
+    )
     p_review.set_defaults(func=_cmd_review)
 
 

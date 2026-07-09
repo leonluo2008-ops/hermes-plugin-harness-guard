@@ -1,0 +1,25 @@
+# harness-guard 项目级配置
+# 项目: hermes-plugin-harness-guard (Hermes plugin，物理拦截 agent 写操作)
+# 此文件应提交到版本控制，与项目一起维护
+
+# 受保护文件 — 写入这些文件需要审查确认
+protected_files:
+  - plugin.yaml          # 插件元数据，改动会导致 Hermes 加载失败
+  - __init__.py          # hook 注册入口，是整个插件的核心
+  - requirements.txt     # 依赖声明
+
+# 自定义审查规则 — 会被追加到全局审查规则之后
+custom_rules:
+  - "修改 reviewer.py 时必须确保 max_tokens >= 2048（glm-5.2 是推理模型，太小会静默 fail-open）"
+  - "修改 rules.py 中的 REVIEW_TOOLS 或 TERMINAL_REVIEW_PATTERNS 时，必须同时更新 README.md 中的触发范围说明"
+  - "修改 __init__.py 的 register() 函数时，必须确保所有 hook 回调的参数签名与 Hermes plugins.py 的 invoke_hook 调用兼容"
+  - "所有 .py 文件修改后必须 py_compile 通过"
+  - "git push 前必须确认 plugin 在 hermes plugins list 中状态为 enabled"
+  - "project_config.py 中 generate_guard_config() 的扫描逻辑只做启发式检测，不要依赖它覆盖所有场景"
+  - "plugin 的所有 import 必须是相对 import（from . import），不能绝对 import（from harness_guard import）"
+
+# 额外的危险命令模式 — 匹配到时触发审查
+dangerous_commands:
+  - "py_compile"          # 确认语法正确
+  - "git push"            # 推送到远端，不可逆
+  - "pip install"         # 改变依赖环境

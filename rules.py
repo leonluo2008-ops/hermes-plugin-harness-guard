@@ -35,10 +35,12 @@ PROTECTED_PATHS = (
 )
 
 
-def should_review(tool_name: str, args: dict) -> bool:
+def should_review(tool_name: str, args: dict, terminal_patterns: list[re.Pattern] | None = None) -> bool:
     """Check if this tool call should trigger GLM-5.2 review."""
+    # Use provided patterns (may include project-level) or fall back to global
+    patterns = terminal_patterns if terminal_patterns is not None else TERMINAL_REVIEW_PATTERNS
+
     if tool_name in REVIEW_TOOLS:
-        # For skill_manage, only review write/patch modes
         if tool_name == "skill_manage":
             action = args.get("action", "")
             if action not in ("create", "edit", "patch", "write_file", "remove_file"):
@@ -47,16 +49,30 @@ def should_review(tool_name: str, args: dict) -> bool:
 
     if tool_name == "terminal":
         command = args.get("command", "")
-        for pattern in TERMINAL_REVIEW_PATTERNS:
+        for pattern in patterns:
             if pattern.search(command):
                 return True
 
     return False
 
 
-def build_review_prompt(audit_trail: str, tool_name: str, args: str, result: str) -> str:
+def build_review_prompt(
+    audit_trail: str,
+    tool_name: str,
+    args: str,
+    result: str,
+    protected_paths: tuple[str, ...] | None = None,
+    custom_rules: list[str] | None = None,
+) -> str:
     """Build the review prompt with dynamically inserted protected files list."""
-    protected_list = "\n".join(f"- {p}" for p in PROTECTED_PATHS)
+    paths = protected_paths if protected_paths is not None else PROTECTED_PATHS
+    rules = custom_rules if custom_rules is not None else []
+
+    protected_list = "\n".join(f"- {p}" for p in paths)
+    custom_section = ""
+    if rules:
+        numbered = "\n".join(f"{i+5}. **{r}**" for i, r in enumerate(rules))
+        custom_section = f"\n{numbered}\n"
     return f"""You are a result-correctness reviewer for an AI agent. The agent just executed a tool call and you must verify whether the result is correct.
 
 ## Audit Trail (recent tool calls in this session, oldest first)

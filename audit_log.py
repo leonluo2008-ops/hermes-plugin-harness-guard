@@ -73,6 +73,14 @@ class AuditLog:
             if dq:
                 self._total_count -= len(dq)
 
+    def total_entries(self) -> int:
+        with self._lock:
+            return self._total_count
+
+    def session_summary(self) -> dict[str, int]:
+        with self._lock:
+            return {sid: len(dq) for sid, dq in self._sessions.items() if dq}
+
 
 # Module-level singleton
 _log = AuditLog()

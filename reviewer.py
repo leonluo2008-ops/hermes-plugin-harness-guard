@@ -29,6 +29,8 @@ def review(
     args_str: str,
     result_str: str,
     audit_trail_str: str,
+    protected_paths: tuple[str, ...] | None = None,
+    custom_rules: list[str] | None = None,
 ) -> str | None:
     """Call GLM-5.2 to review a tool call result.
 
@@ -54,6 +56,8 @@ def review(
         tool_name=tool_name,
         args=args_str,
         result=result_str,
+        protected_paths=protected_paths,
+        custom_rules=custom_rules,
     )
 
     payload = {

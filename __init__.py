@@ -19,6 +19,12 @@ import time as _time
 from typing import Any, Dict, List, Optional
 
 from .audit_log import AuditEntry, AuditLog, get_log, summarize_args, summarize_result
+from .project_config import (
+    get_merged_custom_rules,
+    get_merged_protected_paths,
+    get_merged_terminal_patterns,
+    load_project_config,
+)
 from .reviewer import review
 from .rules import should_review
 
@@ -70,9 +76,15 @@ def _on_transform_tool_result(
     if _is_disabled():
         return None
 
+    # Load per-project config (empty dict if no .hermes-guard.yaml found)
+    proj_cfg = load_project_config()
+    terminal_patterns = get_merged_terminal_patterns(proj_cfg)
+    protected_paths = get_merged_protected_paths(proj_cfg)
+    custom_rules = get_merged_custom_rules(proj_cfg)
+
     # Only review specific tools
     args_dict = args if isinstance(args, dict) else {}
-    if not should_review(tool_name, args_dict):
+    if not should_review(tool_name, args_dict, terminal_patterns=terminal_patterns):
         return None
 
     # Don't review error results — the model already has problems
@@ -106,6 +118,8 @@ def _on_transform_tool_result(
         args_str=args_str,
         result_str=result_str,
         audit_trail_str=audit_trail,
+        protected_paths=protected_paths,
+        custom_rules=custom_rules,
     )
 
     if feedback:
@@ -130,6 +144,10 @@ def register(ctx) -> None:
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("transform_tool_result", _on_transform_tool_result)
     ctx.register_hook("on_session_end", _on_session_end)
+
+    # Register CLI subcommands
+    from .cli import register_guard_cli
+    register_guard_cli(ctx)
 
 
 def _on_session_end(

@@ -1,48 +1,48 @@
 # hermes-plugin-harness-guard
 
-Hermes plugin: post-execution result-correctness guard via GLM-5.2 review.
+Hermes 插件：通过 GLM-5.2 审查实现写入操作的结果正确性防护。
 
-## What it does
+## 功能概述
 
-Every tool call is recorded in an audit log (zero latency). Write operations (`write_file`, `patch`, `skill_manage`, dangerous `terminal` commands) trigger an automatic review by GLM-5.2 before the result reaches the model.
+每次工具调用都会被记录到审计日志中（零延迟）。写入操作（`write_file`、`patch`、`skill_manage`、危险的 `terminal` 命令）会在结果返回模型之前，自动触发 GLM-5.2 审查。
 
-- **PASS**: result flows through unchanged
-- **FAIL**: result is replaced with a warning explaining the issue and how to fix it. The model sees the warning instead of the "success" result, and can self-correct
+- **通过**：结果原样返回，模型正常收到
+- **不通过**：结果被替换为警告信息，包含具体原因和修复建议。模型看到的是警告而非"操作成功"，可以据此自我修正
 
-## Scope
+## 审查范围
 
-### Reviewed (triggers GLM-5.2, ~10-20s latency)
-- `write_file` — any file write
-- `patch` — any file edit
-- `skill_manage` — create/edit/patch/write_file/remove_file actions
-- `terminal` — commands matching dangerous patterns: `hermes config set/delete`, `rm -rf`, `git push --force`, `systemctl stop/restart`, `docker rm/stop`, `crontab`
+### 会触发审查（调用 GLM-5.2，延迟约 10-20 秒）
+- `write_file` — 任何文件写入
+- `patch` — 任何文件编辑
+- `skill_manage` — create / edit / patch / write_file / remove_file 操作
+- `terminal` — 匹配危险模式的命令：`hermes config set/delete`、`rm -rf`、`git push --force`、`systemctl stop/restart`、`docker rm/stop`、`crontab`
 
-### Not reviewed (zero latency)
-- All read-only tools: `read_file`, `search_files`, `web_search`, `web_extract`, `browser_*`, etc.
-- `terminal` commands not matching dangerous patterns
-- `delegate_task` (sub-agent internals are not audited)
-- `execute_code`, `cronjob`, `process`, etc.
+### 不触发审查（零延迟）
+- 所有只读工具：`read_file`、`search_files`、`web_search`、`web_extract`、`browser_*` 等
+- `terminal` 中未匹配危险模式的命令
+- `delegate_task`（子 agent 内部操作不受审查）
+- `execute_code`、`cronjob`、`process` 等
 
-### Not covered
-- Pure text responses from the model (no tool call = no hook)
-- Model's internal reasoning process
-- Sub-agent internal operations
+### 无法覆盖
+- 模型的纯文本回复（不经过工具调用 = 不触发 hook）
+- 模型的内部推理过程
+- 子 agent 内部操作
 
-## Prerequisites
+## 前置条件
 
-- Hermes Agent with plugin support
-- `httpx` package: `pip install httpx`
-- GLM-5.2 API key set as `ZAI_API_KEY` in `~/.hermes/.env`
+- Hermes Agent（需支持 plugin）
+- `httpx` 包：`pip install httpx`
+- GLM-5.2 API 密钥，设为环境变量 `ZAI_API_KEY`（在 `~/.hermes/.env` 中配置）
 
-## Install
+## 安装
 
 ```bash
 cd ~/.hermes/plugins
 git clone https://github.com/leonluo2008-ops/hermes-plugin-harness-guard.git harness-guard
-pip install httpx  # if not already installed
+pip install httpx  # 如未安装
 ```
 
-Then enable in `~/.hermes/config.yaml`:
+在 `~/.hermes/config.yaml` 中启用：
 
 ```yaml
 plugins:
@@ -50,55 +50,57 @@ plugins:
     - harness-guard
 ```
 
-Restart Hermes gateway to load.
+重启 Hermes gateway 即可加载。
 
-## Configuration
+## 配置项
 
-| Environment Variable | Default | Description |
+| 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `ZAI_API_KEY` | (required) | GLM-5.2 API key |
-| `HARNESS_GUARD_DISABLE` | unset | Set any value to disable the plugin without removing from config |
+| `ZAI_API_KEY` | （必填） | GLM-5.2 API 密钥 |
+| `HARNESS_GUARD_DISABLE` | 未设置 | 设为任意值可禁用插件，无需修改 config |
 
-## Review timeout
+## 审查超时
 
-Default: 60 seconds. Edit `harness_guard/reviewer.py` → `_TIMEOUT_S` to adjust.
+默认 60 秒。修改 `harness_guard/reviewer.py` 中的 `_TIMEOUT_S` 可调整。
 
-## Review behavior
+## 审查规则
 
-The review prompt checks four rules:
-1. **Factual correctness**: values must be based on facts actually read in the audit trail
-2. **Protected files**: `SOUL.md`, `.hermes.md`, `config.yaml`, `jobs.json` require user authorization
-3. **Consistency**: writes must be consistent with what was read
-4. **No hallucination**: invented values (API keys, URLs, ports, paths) are flagged
+审查 prompt 检查以下四条规则：
 
-## Architecture
+1. **事实正确性**：写入的值必须基于审计日志中实际读取过的事实
+2. **受保护文件**：`SOUL.md`、`.hermes.md`、`config.yaml`、`jobs.json` 的写入需要用户明确授权
+3. **一致性检查**：写入内容必须与之前读取的内容和用户意图一致
+4. **禁止幻觉**：凭空编造的值（API 密钥、URL、端口号、路径、配置字段名）会被标记
+
+## 架构
 
 ```
-Every tool call
-  ├─ post_tool_call hook → audit log (always, ~0ms)
-  └─ if write operation
-       └─ transform_tool_result hook → GLM-5.2 review (~10-20s)
-            ├─ PASS → result unchanged
-            └─ FAIL → result replaced with warning
+每次工具调用
+  ├─ post_tool_call hook → 写入审计日志（始终执行，约 0ms）
+  └─ 如果是写入操作
+       └─ transform_tool_result hook → GLM-5.2 审查（约 10-20s）
+            ├─ 通过 → 结果原样返回
+            └─ 不通过 → 结果替换为警告信息
 ```
 
-- **Fail-open**: API errors, timeouts, missing key → skip review silently (never blocks the agent)
-- **Thread-safe**: audit log uses `threading.Lock`
-- **Audit trail**: per-session FIFO, 50 entries max; global cap 10,000 entries
+- **故障开放（fail-open）**：API 报错、超时、密钥缺失时跳过审查，不会阻塞 agent
+- **线程安全**：审计日志使用 `threading.Lock`
+- **审计日志**：每会话 FIFO，上限 50 条；全局上限 10,000 条
 
-## Uninstall
+## 卸载
 
 ```bash
 hermes plugins disable harness-guard
 rm -rf ~/.hermes/plugins/harness-guard
 ```
 
-Then remove from `config.yaml`:
+从 `config.yaml` 中移除：
+
 ```yaml
 plugins:
   enabled: []
 ```
 
-## License
+## 许可证
 
 MIT

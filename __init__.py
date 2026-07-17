@@ -3,11 +3,23 @@
 Two hooks:
 1. post_tool_call: Record audit log entry (every tool call, zero latency).
 2. transform_tool_result: For write operations, send tool result + audit trail
-   to GLM-5.2 for correctness review. If review fails, replace the tool result
-   with a feedback message so the model knows why and how to fix it.
+   to a review model for correctness check. If review fails, replace the tool
+   result with a feedback message so the model knows why and how to fix it.
+
+Configuration:
+  The plugin reads its own .env file located in this directory
+  (~/.hermes/plugins/harness-guard/.env). Copy `.env.example` to `.env`
+  and fill in your values. System-level env vars of the same name still
+  take precedence (so you can override per-machine without editing the file).
 
 Environment variables:
-  HARNESS_GUARD_DISABLE=1   Disable the plugin entirely (fail-open).
+  HARNESS_GUARD_API_KEY             API key (priority: plugin .env, then env)
+  HARNESS_GUARD_BASE_URL            OpenAI-compatible chat completions base URL
+  HARNESS_GUARD_MODEL               Model name (e.g. glm-5.2, gemini-3.5-flash)
+  HARNESS_GUARD_TIMEOUT_S           Request timeout in seconds (default 60)
+  HARNESS_GUARD_MAX_AUDIT_TRAIL_CHARS  Max chars of audit trail (default 4000)
+  HARNESS_GUARD_DISABLE=1           Disable the plugin entirely (fail-open).
+  ZAI_API_KEY / GLM_API_KEY         Backward-compat key aliases.
 """
 
 from __future__ import annotations
@@ -16,19 +28,55 @@ import json
 import logging
 import os
 import time as _time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .audit_log import AuditEntry, AuditLog, get_log, summarize_args, summarize_result
-from .project_config import (
-    get_merged_custom_rules,
-    get_merged_protected_paths,
-    get_merged_terminal_patterns,
-    load_project_config,
-)
-from .reviewer import review
-from .rules import should_review
+# Load the plugin's own .env (if present) BEFORE importing submodules that
+# may read env vars at import time. System env wins on conflict (override=True).
+_PLUGIN_DIR = Path(__file__).resolve().parent
+_PLUGIN_ENV = _PLUGIN_DIR / ".env"
+
+
+def _load_plugin_dotenv() -> int:
+    """Load KEY=VALUE lines from the plugin's own .env into os.environ.
+
+    System-level env vars take precedence (we don't clobber them). Returns
+    the number of variables set from the file.
+    """
+    if not _PLUGIN_ENV.is_file():
+        return 0
+    loaded = 0
+    try:
+        with _PLUGIN_ENV.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if not key:
+                    continue
+                if key in os.environ:
+                    # System / global env wins — plugin .env is the fallback
+                    continue
+                os.environ[key] = value
+                loaded += 1
+    except OSError as exc:
+        logger.warning("harness-guard: failed to read %s: %s", _PLUGIN_ENV, exc)
+    return loaded
+
 
 logger = logging.getLogger(__name__)
+_PLUG_ENV_VARS_LOADED = _load_plugin_dotenv()
+if _PLUG_ENV_VARS_LOADED:
+    logger.info(
+        "harness-guard: loaded %d env var(s) from %s",
+        _PLUG_ENV_VARS_LOADED,
+        _PLUGIN_ENV,
+    )
 
 
 def _is_disabled() -> bool:

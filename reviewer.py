@@ -14,6 +14,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
+<<<<<<< HEAD
 _DEFAULT_PROVIDER = "glm"
 
 # Pre-defined configurations for common providers
@@ -32,10 +33,15 @@ _PROVIDER_PRESETS = {
     }
 }
 
+=======
+_DEFAULT_API_BASE = "https://open.bigmodel.cn/api/coding/paas/v4"
+_DEFAULT_MODEL = "glm-5.2"
+>>>>>>> 24d4cf3 (feat(reviewer): add HARNESS_GUARD_* env config for API key, base URL, model, timeout, max audit chars)
 _DEFAULT_TIMEOUT_S = 60
 _DEFAULT_MAX_AUDIT_TRAIL_CHARS = 4000
 
 
+<<<<<<< HEAD
 def _get_provider_config() -> dict:
     """Get the active provider preset configuration.
 
@@ -58,11 +64,21 @@ def _get_api_base() -> str:
     if env_override:
         return env_override.rstrip("/")
     return _get_provider_config()["base_url"].rstrip("/")
+=======
+def _get_api_base() -> str:
+    """API base URL.
+
+    Override via HARNESS_GUARD_BASE_URL env var (useful for OpenAI-compatible
+    proxies, e.g. jxincm.cn, or self-hosted endpoints).
+    """
+    return os.getenv("HARNESS_GUARD_BASE_URL", _DEFAULT_API_BASE).strip().rstrip("/")
+>>>>>>> 24d4cf3 (feat(reviewer): add HARNESS_GUARD_* env config for API key, base URL, model, timeout, max audit chars)
 
 
 def _get_model() -> str:
     """Model name to use for review.
 
+<<<<<<< HEAD
     Override priority:
     1. HARNESS_GUARD_MODEL env var
     2. Resolved provider's default model
@@ -71,6 +87,12 @@ def _get_model() -> str:
     if env_override:
         return env_override
     return _get_provider_config()["model"]
+=======
+    Override via HARNESS_GUARD_MODEL env var (e.g. 'gemini-3.5-flash',
+    'MiniMax-M3', etc. for cross-model review instead of GLM-5.2).
+    """
+    return os.getenv("HARNESS_GUARD_MODEL", _DEFAULT_MODEL).strip()
+>>>>>>> 24d4cf3 (feat(reviewer): add HARNESS_GUARD_* env config for API key, base URL, model, timeout, max audit chars)
 
 
 def _get_api_key() -> str:
@@ -80,8 +102,11 @@ def _get_api_key() -> str:
     1. HARNESS_GUARD_API_KEY  (plugin-specific, recommended)
     2. ZAI_API_KEY            (legacy GLM-5.2 default, backward compatible)
     3. GLM_API_KEY            (alternative env name used by some zai setups)
+<<<<<<< HEAD
     4. MINIMAX_CN_API_KEY     (alternative env name for minimax setup)
     5. JUXIN_GEMINI_API_KEY   (alternative env name for juxin setup)
+=======
+>>>>>>> 24d4cf3 (feat(reviewer): add HARNESS_GUARD_* env config for API key, base URL, model, timeout, max audit chars)
 
     Returns empty string if none set — caller should fail-open.
     """
@@ -89,8 +114,11 @@ def _get_api_key() -> str:
         os.getenv("HARNESS_GUARD_API_KEY", "")
         or os.getenv("ZAI_API_KEY", "")
         or os.getenv("GLM_API_KEY", "")
+<<<<<<< HEAD
         or os.getenv("MINIMAX_CN_API_KEY", "")
         or os.getenv("JUXIN_GEMINI_API_KEY", "")
+=======
+>>>>>>> 24d4cf3 (feat(reviewer): add HARNESS_GUARD_* env config for API key, base URL, model, timeout, max audit chars)
     ).strip()
 
 

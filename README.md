@@ -51,9 +51,9 @@ plugins:
 
 ## 配置
 
-### v1.1.0 起：plugin 自带 .env（推荐）
+### v1.2.0 起：插件自带 .env（推荐配置方式）
 
-从 v1.1.0 起，harness-guard 在插件启动时**自动加载自身目录的 `.env`**，无需配置全局环境变量：
+从 v1.2.0 起，harness-guard 在插件启动时**自动加载自身目录的 `.env`**，无需配置全局环境变量：
 
 ```bash
 # 1. 复制模板
@@ -64,29 +64,47 @@ cp ~/.hermes/plugins/harness-guard/.env.example \
 nano ~/.hermes/plugins/harness-guard/.env
 ```
 
-```ini
-# 必填：审查模型 API key
-HARNESS_GUARD_API_KEY=your-key-here
+### Provider 配置（v1.2.0 简化）
 
-# 可选：自定义 endpoint（默认 Z.AI / GLM-5.2）
-HARNESS_GUARD_BASE_URL=https://api.example.com/v1
-HARNESS_GUARD_MODEL=your-model-name
+`.env` 只需要写 `HARNESS_GUARD_PROVIDER` + `HARNESS_GUARD_API_KEY`：
+
+#### 选项 1：预设供应商（推荐）
+
+预设值自动填好 base URL 和 model：
+
+| `HARNESS_GUARD_PROVIDER=` | 自动 base URL | 自动 model |
+|---|---|---|
+| `glm` (默认) | `https://open.bigmodel.cn/api/coding/paas/v4` | `glm-5.2` |
+| `minimax` | `https://api.minimaxi.com/v1` | `MiniMax-M3` |
+| `juxin` | `https://api.jxincm.cn/v1` | `gemini-3.5-flash` |
+
+```ini
+HARNESS_GUARD_PROVIDER=glm
+HARNESS_GUARD_API_KEY=sk-...
 ```
 
-重启 gateway 后生效。
+#### 选项 2：自定义覆盖（provider + 显式 base URL/model）
 
-### 优先级（v1.1.0）
+```ini
+HARNESS_GUARD_PROVIDER=custom
+HARNESS_GUARD_BASE_URL=https://api.example.com/v1
+HARNESS_GUARD_MODEL=gpt-4
+HARNESS_GUARD_API_KEY=sk-...
+```
+
+### 优先级
 
 1. **进程环境变量**（如 `systemd Environment=` 或 shell `export`）—— **最高优先**
 2. **plugin 自带 `.env`**（`~/.hermes/plugins/harness-guard/.env`）—— 默认
 
 系统级环境变量始终覆盖 plugin `.env`，便于多机器部署时按机器覆盖。
 
-### API key 解析顺序（向后兼容）
+### API key 解析顺序
 
 1. `HARNESS_GUARD_API_KEY` — 推荐，最明确
-2. `ZAI_API_KEY` — Z.AI / GLM 历史命名（向后兼容）
-3. `GLM_API_KEY` — 另一种 GLM 命名约定
+2. `ZAI_API_KEY` / `GLM_API_KEY` — Z.AI / GLM fallback
+3. `MINIMAX_CN_API_KEY` — Minimax fallback
+4. `JUXIN_GEMINI_API_KEY` — Juxin fallback
 
 **设置其中一个即可**，按优先级解析。
 
@@ -94,11 +112,10 @@ HARNESS_GUARD_MODEL=your-model-name
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
+| `HARNESS_GUARD_PROVIDER` | `glm` | 供应商预设名（glm / minimax / juxin / custom） |
 | `HARNESS_GUARD_API_KEY` | （未设置） | API key（优先级最高） |
-| `ZAI_API_KEY` | （未设置） | API key（fallback，向后兼容） |
-| `GLM_API_KEY` | （未设置） | API key（fallback） |
-| `HARNESS_GUARD_BASE_URL` | `https://open.bigmodel.cn/api/coding/paas/v4` | API base URL（OpenAI 兼容 chat completions） |
-| `HARNESS_GUARD_MODEL` | `glm-5.2` | 模型名 |
+| `HARNESS_GUARD_BASE_URL` | （用 preset 默认） | 覆盖 base URL（仅在 `PROVIDER=custom` 时必须） |
+| `HARNESS_GUARD_MODEL` | （用 preset 默认） | 覆盖 model（仅在 `PROVIDER=custom` 时必须） |
 | `HARNESS_GUARD_TIMEOUT_S` | `60` | 审查超时（秒，整数） |
 | `HARNESS_GUARD_MAX_AUDIT_TRAIL_CHARS` | `4000` | 传给审查 prompt 的审计日志最大字符数 |
 | `HARNESS_GUARD_DISABLE` | 未设置 | 设为任意值可禁用插件，无需修改 config |
@@ -123,7 +140,7 @@ curl -X POST "${HARNESS_GUARD_BASE_URL}/chat/completions" \
 1. **事实正确性**：写入的值必须基于审计日志中实际读取过的事实
 2. **受保护文件**：`SOUL.md`、`.hermes.md`、`config.yaml`、`jobs.json` 的写入需要用户明确授权
 3. **一致性检查**：写入内容必须与之前读取的内容和用户意图一致
-4. **禁止幻觉**：凭空编造的值（API 密钥、URL、端口号、路径、配置字段名）会被标记
+4. **禁止幻觉**：凭空编造的值（API 密钥、URL、端口号、路径、模型名、配置字段名）会被标记
 
 ## 架构
 
@@ -139,7 +156,7 @@ curl -X POST "${HARNESS_GUARD_BASE_URL}/chat/completions" \
 - **故障开放（fail-open）**：API 报错、超时、密钥缺失时跳过审查，不会阻塞 agent
 - **线程安全**：审计日志使用 `threading.Lock`
 - **审计日志**：每会话 FIFO，上限 50 条；全局上限 10,000 条
-- **思考标签剥离**：v1.1.0 起，审查响应中的 `<think>...</think>` 块会自动剥离，避免 thinking 模型（GLM-5.2、MiniMax-M3、DeepSeek R1 等）误判 PASS/FAIL
+- **思考标签剥离**：v1.1.0 起，审查响应中的 `...` 块会自动剥离，避免 thinking 模型（GLM-5.2、MiniMax-M3、DeepSeek R1 等）误判 PASS/FAIL
 
 ## 卸载
 
@@ -157,21 +174,27 @@ plugins:
 
 ## 更新日志
 
-### v1.1.0（2026-07-17）
+### v1.2.0（2026-07-17）
 
 **新增**：
 
-- ✅ `HARNESS_GUARD_API_KEY` / `HARNESS_GUARD_BASE_URL` / `HARNESS_GUARD_MODEL` / `HARNESS_GUARD_TIMEOUT_S` / `HARNESS_GUARD_MAX_AUDIT_TRAIL_CHARS` 环境变量（替代硬编码）
-- ✅ Plugin 自带 `.env` 加载器（启动时自动读取 `~/.hermes/plugins/harness-guard/.env`）
-- ✅ `.env.example` 模板（5 个分组：Auth / Endpoint / Model / Tuning / Kill switch）
-- ✅ 剥离审查响应中的 `<think>...</think>` 标签（适配 thinking 模型）
-- ✅ 审查日志显示实际模型名（不再硬编码 "GLM response"）
+- ✅ **Pre-defined provider presets**（`glm` / `minimax` / `juxin`）：`.env` 里只需设 `HARNESS_GUARD_PROVIDER` + `HARNESS_GUARD_API_KEY`，base URL 和 model 自动映射
+- ✅ **Fallback key 解析**：`MINIMAX_CN_API_KEY` / `JUXIN_GEMINI_API_KEY` 也作为插件 key 解析的备选
+- ✅ **Custom provider**：`HARNESS_GUARD_PROVIDER=custom` 允许显式覆盖 base URL 和 model
+- ✅ 重写 README：聚焦"provider 预设"作为主推荐配置模式
+- ✅ 重写 `.env.example`：单一极简配置模板（只 4 行有效配置项）
 
 **向后兼容**：
 
-- `ZAI_API_KEY` / `GLM_API_KEY` 仍可用作 fallback
-- 默认 endpoint 不变（Z.AI / GLM-5.2）
-- fail-open 行为不变
+- v1.1.0 的 `HARNESS_GUARD_BASE_URL` / `HARNESS_GUARD_MODEL` / `HARNESS_GUARD_API_KEY` 等变量依然完整支持
+- 不显式设置 `HARNESS_GUARD_PROVIDER` 时，默认 `glm` + Z.AI 端点 + `glm-5.2`（向后兼容 v1.0.0 / v1.1.0）
+
+### v1.1.0（2026-07-09）
+
+- ✅ `HARNESS_GUARD_*` 环境变量族（替代硬编码）
+- ✅ Plugin 自带 `.env` 加载器（启动时自动读）
+- ✅ `.env.example` 模板
+- ✅ 剥离 `...` 标签（适配 thinking 模型）
 
 ### v1.0.0（2026-07-09）
 

@@ -1,6 +1,6 @@
 name: harness-guard
-version: "1.1.0"
-description: "Post-execution result-correctness guard: audit all tool calls, verify write operation results via a configurable review model (default GLM-5.2) before the result reaches the model. Focuses on whether the output is correct, not on whether the action should be taken."
+version: "1.2.0"
+description: "Post-execution result-correctness guard: audit all tool calls, verify write operation results via a configurable review model (default GLM-5.2 via Z.AI) before the result reaches the model. Focuses on whether the output is correct, not on whether the action should be taken. Supports pre-defined providers (glm/minimax/juxin) and custom OpenAI-compatible endpoints."
 author: "user"
 hooks:
   - post_tool_call

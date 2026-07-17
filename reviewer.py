@@ -14,14 +14,67 @@ import time
 
 logger = logging.getLogger(__name__)
 
-_API_BASE = "https://open.bigmodel.cn/api/coding/paas/v4"
-_MODEL = "glm-5.2"
-_TIMEOUT_S = 60
-_MAX_AUDIT_TRAIL_CHARS = 4000
+_DEFAULT_API_BASE = "https://open.bigmodel.cn/api/coding/paas/v4"
+_DEFAULT_MODEL = "glm-5.2"
+_DEFAULT_TIMEOUT_S = 60
+_DEFAULT_MAX_AUDIT_TRAIL_CHARS = 4000
+
+
+def _get_api_base() -> str:
+    """API base URL.
+
+    Override via HARNESS_GUARD_BASE_URL env var (useful for OpenAI-compatible
+    proxies, e.g. jxincm.cn, or self-hosted endpoints).
+    """
+    return os.getenv("HARNESS_GUARD_BASE_URL", _DEFAULT_API_BASE).strip().rstrip("/")
+
+
+def _get_model() -> str:
+    """Model name to use for review.
+
+    Override via HARNESS_GUARD_MODEL env var (e.g. 'gemini-3.5-flash',
+    'MiniMax-M3', etc. for cross-model review instead of GLM-5.2).
+    """
+    return os.getenv("HARNESS_GUARD_MODEL", _DEFAULT_MODEL).strip()
 
 
 def _get_api_key() -> str:
-    return os.getenv("ZAI_API_KEY", "").strip()
+    """API key for the review endpoint.
+
+    Resolution order:
+    1. HARNESS_GUARD_API_KEY  (plugin-specific, recommended)
+    2. ZAI_API_KEY            (legacy GLM-5.2 default, backward compatible)
+    3. GLM_API_KEY            (alternative env name used by some zai setups)
+
+    Returns empty string if none set — caller should fail-open.
+    """
+    return (
+        os.getenv("HARNESS_GUARD_API_KEY", "")
+        or os.getenv("ZAI_API_KEY", "")
+        or os.getenv("GLM_API_KEY", "")
+    ).strip()
+
+
+def _get_timeout_s() -> int:
+    """Review timeout in seconds (default 60).
+
+    Override via HARNESS_GUARD_TIMEOUT_S env var (integer seconds).
+    """
+    try:
+        return int(os.getenv("HARNESS_GUARD_TIMEOUT_S", str(_DEFAULT_TIMEOUT_S)).strip())
+    except (ValueError, TypeError):
+        return _DEFAULT_TIMEOUT_S
+
+
+def _get_max_audit_trail_chars() -> int:
+    """Max audit trail chars passed to review prompt (default 4000).
+
+    Override via HARNESS_GUARD_MAX_AUDIT_TRAIL_CHARS env var (integer).
+    """
+    try:
+        return int(os.getenv("HARNESS_GUARD_MAX_AUDIT_TRAIL_CHARS", str(_DEFAULT_MAX_AUDIT_TRAIL_CHARS)).strip())
+    except (ValueError, TypeError):
+        return _DEFAULT_MAX_AUDIT_TRAIL_CHARS
 
 
 def review(
@@ -41,12 +94,20 @@ def review(
     # Fail-open: if no API key, skip review silently
     api_key = _get_api_key()
     if not api_key:
-        logger.warning("harness-guard: ZAI_API_KEY not found, skipping review")
+        logger.warning(
+            "harness-guard: no API key set (HARNESS_GUARD_API_KEY / ZAI_API_KEY / "
+            "GLM_API_KEY), skipping review"
+        )
         return None
 
+    api_base = _get_api_base()
+    model = _get_model()
+    timeout_s = _get_timeout_s()
+    max_audit_chars = _get_max_audit_trail_chars()
+
     # Truncate audit trail if too long — keep head (earliest reads are key evidence)
-    if len(audit_trail_str) > _MAX_AUDIT_TRAIL_CHARS:
-        audit_trail_str = audit_trail_str[:_MAX_AUDIT_TRAIL_CHARS] + "\n... (truncated)"
+    if len(audit_trail_str) > max_audit_chars:
+        audit_trail_str = audit_trail_str[:max_audit_chars] + "\n... (truncated)"
 
     # Build prompt
     from .rules import build_review_prompt
@@ -61,7 +122,7 @@ def review(
     )
 
     payload = {
-        "model": _MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 2048,
         "temperature": 0.1,
@@ -72,13 +133,13 @@ def review(
 
         start = time.monotonic()
         resp = httpx.post(
-            f"{_API_BASE}/chat/completions",
+            f"{api_base}/chat/completions",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json=payload,
-            timeout=_TIMEOUT_S,
+            timeout=timeout_s,
         )
         elapsed = time.monotonic() - start
         logger.info("harness-guard: review took %.1fs for %s", elapsed, tool_name)
@@ -89,12 +150,16 @@ def review(
 
         data = resp.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        # Strip <think>...</think> reasoning tags emitted by thinking-capable
+        # models (e.g. GLM-5.2, MiniMax-M3, DeepSeek R1) so the PASS/FAIL
+        # detector only sees the actual verdict.
+        content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL).strip()
 
         if not content:
             return None
 
         # Parse response
-        logger.info("harness-guard: GLM response: %s", content[:500])
+        logger.info("harness-guard: review response from %s: %s", model, content[:500])
         if content.upper().startswith("PASS"):
             return None  # Review passed, don't modify result
 

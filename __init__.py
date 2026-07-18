@@ -69,6 +69,21 @@ def _load_plugin_dotenv() -> int:
     return loaded
 
 
+# Submodule imports — all symbols used in hook callbacks are imported here
+# at package level so callbacks can resolve them without per-call import.
+# Note: _load_plugin_dotenv() is invoked at L85 (after this block); submodules
+# read env vars lazily via os.getenv() at call time, so import order relative
+# to _load_plugin_dotenv() does not affect env visibility.
+from .audit_log import AuditEntry, get_log, summarize_args, summarize_result
+from .project_config import (
+    load_project_config,
+    get_merged_terminal_patterns,
+    get_merged_protected_paths,
+    get_merged_custom_rules,
+)
+from .reviewer import review
+from .rules import should_review
+
 logger = logging.getLogger(__name__)
 _PLUG_ENV_VARS_LOADED = _load_plugin_dotenv()
 if _PLUG_ENV_VARS_LOADED:
